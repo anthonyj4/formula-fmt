@@ -55,6 +55,9 @@ $ go run . "='Q1 Report'!A1+Sheet2!\$B\$2"
 
 $ go run . '=IF(A1=0,#DIV/0!,A1/B1)'
 =IF(A1 = 0, #DIV/0!, A1 / B1)
+
+$ go run . '=SUM(A:A)+SUM(TaxRate,Sheet2!1:3)'
+=SUM(A:A) + SUM(TaxRate, Sheet2!1:3)
 ```
 
 With no argument it reads the formula from stdin, so it also works as a
@@ -70,17 +73,22 @@ $ echo '=sum(a1,a2)' | go run . --lenient
 Numbers, string literals (with `""` as an escaped quote, matching Excel),
 `TRUE`/`FALSE`, error literals (`#REF!`, `#DIV/0!`, `#N/A`, `#NAME?`,
 `#NULL!`, `#NUM!`, `#VALUE!`), cell references and ranges with `$` anchors,
+full-column and full-row references (`A:A`, `$1:$1`), named ranges,
 sheet-qualified references including quoted sheet names, function calls,
 parentheses, and the arithmetic, comparison, concatenation (`&`), and
 percent (`%`) operators, with Excel's actual operator precedence (unary
 minus binds tighter than `^`, so `-2^2` is `4`).
 
+A bare word that isn't a cell reference, a full-column/full-row reference,
+or a function call is parsed as a named range and printed back exactly as
+written - unlike function names and column letters, a name has no canonical
+casing to normalize toward.
+
 ## What isn't, yet
 
-Named ranges, full-column/full-row references (`A:A`), array literals
-(`{1,2,3}`), structured table references (`Table1[Column]`), and the
-intersection/union operators. Formulas using those fail to parse for now -
-see the roadmap in the issue tracker.
+Array literals (`{1,2,3}`), structured table references
+(`Table1[Column]`), and the intersection/union operators. Formulas using
+those fail to parse for now - see the roadmap in the issue tracker.
 
 ## Library use
 

@@ -56,6 +56,9 @@ func writeNode(b *strings.Builder, n Node) {
 		b.WriteByte('(')
 		writeNode(b, v.X)
 		b.WriteByte(')')
+	case *NamedRange:
+		writeSheetPrefix(b, v.Sheet, v.SheetQuoted)
+		b.WriteString(v.Name)
 	case *Call:
 		b.WriteString(strings.ToUpper(v.Name))
 		b.WriteByte('(')
@@ -73,16 +76,7 @@ func writeNode(b *strings.Builder, n Node) {
 }
 
 func writeCellRef(b *strings.Builder, r *CellRef) {
-	if r.Sheet != "" {
-		if r.SheetQuoted || needsSheetQuoting(r.Sheet) {
-			b.WriteByte('\'')
-			b.WriteString(strings.ReplaceAll(r.Sheet, "'", "''"))
-			b.WriteByte('\'')
-		} else {
-			b.WriteString(r.Sheet)
-		}
-		b.WriteByte('!')
-	}
+	writeSheetPrefix(b, r.Sheet, r.SheetQuoted)
 	if r.ColAbsolute {
 		b.WriteByte('$')
 	}
@@ -91,6 +85,22 @@ func writeCellRef(b *strings.Builder, r *CellRef) {
 		b.WriteByte('$')
 	}
 	b.WriteString(r.Row)
+}
+
+// writeSheetPrefix writes the "Sheet1!" or "'Q1 Report'!" prefix shared by
+// cell references, ranges, and named ranges. It writes nothing for sheet == "".
+func writeSheetPrefix(b *strings.Builder, sheet string, quoted bool) {
+	if sheet == "" {
+		return
+	}
+	if quoted || needsSheetQuoting(sheet) {
+		b.WriteByte('\'')
+		b.WriteString(strings.ReplaceAll(sheet, "'", "''"))
+		b.WriteByte('\'')
+	} else {
+		b.WriteString(sheet)
+	}
+	b.WriteByte('!')
 }
 
 // needsSheetQuoting reports whether a sheet name must be wrapped in single

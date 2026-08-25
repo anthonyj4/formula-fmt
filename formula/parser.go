@@ -19,6 +19,11 @@ type String struct{ Value string }
 type Boolean struct{ Value bool }
 type ErrorLiteral struct{ Text string }
 
+// CellRef is a reference to a single cell, or to one side of a range. Column
+// or Row (but never both) may be empty: that's a full-column ("A" in "A:A")
+// or full-row ("1" in "1:1") reference, which only appears as a Range
+// endpoint - there's no such thing as a bare full-column reference on its
+// own in a formula.
 type CellRef struct {
 	Sheet       string
 	SheetQuoted bool
@@ -31,6 +36,16 @@ type CellRef struct {
 type Range struct {
 	From CellRef
 	To   CellRef
+}
+
+// NamedRange is a reference to a user-defined name rather than a cell or
+// range, e.g. "TaxRate" or "Sheet1!TaxRate". Unlike cell references and
+// function names, a name's case is whatever its author gave it - there's no
+// canonical spelling to normalize toward, so it round-trips unchanged.
+type NamedRange struct {
+	Sheet       string
+	SheetQuoted bool
+	Name        string
 }
 
 type UnaryExpr struct {
@@ -66,6 +81,7 @@ func (*PercentExpr) node()  {}
 func (*BinaryExpr) node()   {}
 func (*Paren) node()        {}
 func (*Call) node()         {}
+func (*NamedRange) node()   {}
 
 // Formula is a fully parsed cell formula.
 type Formula struct {
@@ -73,6 +89,9 @@ type Formula struct {
 }
 
 var cellRefPattern = regexp.MustCompile(`^(\$?)([A-Za-z]{1,3})(\$?)([0-9]+)$`)
+var columnRefPattern = regexp.MustCompile(`^(\$?)([A-Za-z]{1,3})$`)
+var rowRefPattern = regexp.MustCompile(`^(\$?)([0-9]+)$`)
+var namedRangePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
 
 // Parse validates src and builds its AST.
 //
@@ -279,6 +298,16 @@ func (p *parser) parsePrimary() (Node, error) {
 	switch tok.kind {
 	case tokNumber:
 		p.advance()
+		if isPlainInteger(tok.text) && p.cur().kind == tokColon {
+			// a bare digit sequence right before ':' can only be the start
+			// of a full-row range, e.g. the "1" in "1:1" - a plain number
+			// is never followed by ':' otherwise.
+			first, err := parseRowRefText(tok.text, "", false)
+			if err != nil {
+				return nil, err
+			}
+			return p.finishRefOrRange(first)
+		}
 		return &Number{Text: tok.text}, nil
 	case tokString:
 		p.advance()
@@ -315,15 +344,23 @@ func (p *parser) parseIdentLike() (Node, error) {
 	if p.cur().kind == tokBang {
 		p.advance()
 		refTok := p.cur()
-		if refTok.kind != tokIdent {
+		switch refTok.kind {
+		case tokIdent:
+			p.advance()
+			return p.parseRefOrName(refTok.text, name, wasQuoted)
+		case tokNumber:
+			if !isPlainInteger(refTok.text) {
+				return nil, fmt.Errorf("expected cell reference after '!' at position %d", refTok.pos)
+			}
+			p.advance()
+			first, err := parseRowRefText(refTok.text, name, wasQuoted)
+			if err != nil {
+				return nil, err
+			}
+			return p.finishRefOrRange(first)
+		default:
 			return nil, fmt.Errorf("expected cell reference after '!' at position %d", refTok.pos)
 		}
-		p.advance()
-		first, err := parseCellRefText(refTok.text, name, wasQuoted, p.lenient)
-		if err != nil {
-			return nil, err
-		}
-		return p.finishRefOrRange(first)
 	}
 
 	if p.cur().kind == tokLParen {
@@ -338,11 +375,43 @@ func (p *parser) parseIdentLike() (Node, error) {
 		return &Boolean{Value: upper == "TRUE"}, nil
 	}
 
-	first, err := parseCellRefText(name, "", false, p.lenient)
-	if err != nil {
-		return nil, err
+	return p.parseRefOrName(name, "", false)
+}
+
+// parseRefOrName resolves a bare identifier (optionally sheet-qualified via
+// the sheet/sheetQuoted params) into a cell reference, a column- or row-only
+// reference, or a named range if its shape doesn't match any kind of
+// reference at all. Which regex the text matches decides the outcome; a
+// shape match with a strict-mode casing failure is reported as that error
+// rather than falling through to being treated as a name.
+func (p *parser) parseRefOrName(text, sheet string, sheetQuoted bool) (Node, error) {
+	if cellRefPattern.MatchString(text) {
+		ref, err := parseCellRefText(text, sheet, sheetQuoted, p.lenient)
+		if err != nil {
+			return nil, err
+		}
+		return p.finishRefOrRange(ref)
 	}
-	return p.finishRefOrRange(first)
+	if p.cur().kind == tokColon {
+		if columnRefPattern.MatchString(text) {
+			ref, err := parseColumnRefText(text, sheet, sheetQuoted, p.lenient)
+			if err != nil {
+				return nil, err
+			}
+			return p.finishRefOrRange(ref)
+		}
+		if rowRefPattern.MatchString(text) {
+			ref, err := parseRowRefText(text, sheet, sheetQuoted)
+			if err != nil {
+				return nil, err
+			}
+			return p.finishRefOrRange(ref)
+		}
+	}
+	if !namedRangePattern.MatchString(text) {
+		return nil, fmt.Errorf("invalid reference or name %q", text)
+	}
+	return &NamedRange{Sheet: sheet, SheetQuoted: sheetQuoted, Name: text}, nil
 }
 
 func (p *parser) finishRefOrRange(first CellRef) (Node, error) {
@@ -352,15 +421,40 @@ func (p *parser) finishRefOrRange(first CellRef) (Node, error) {
 	}
 	p.advance()
 	tok := p.cur()
-	if tok.kind != tokIdent {
+
+	var second CellRef
+	var err error
+	switch {
+	case tok.kind == tokNumber && isPlainInteger(tok.text):
+		if first.Column != "" {
+			return nil, fmt.Errorf("expected column reference after ':' at position %d", tok.pos)
+		}
+		second, err = parseRowRefText(tok.text, first.Sheet, false)
+	case tok.kind == tokIdent:
+		second, err = parseRangeEndpointText(tok.text, first, p.lenient)
+	default:
 		return nil, fmt.Errorf("expected cell reference after ':' at position %d", tok.pos)
 	}
-	p.advance()
-	second, err := parseCellRefText(tok.text, first.Sheet, false, p.lenient)
 	if err != nil {
 		return nil, err
 	}
+	p.advance()
 	return &Range{From: first, To: second}, nil
+}
+
+// parseRangeEndpointText parses the right-hand side of a range so that it
+// matches the shape of first: a full A1 ref pairs with another full ref, a
+// column-only ref (the "A" in "A:A") pairs with another column, and a
+// row-only ref pairs with another row.
+func parseRangeEndpointText(text string, first CellRef, lenient bool) (CellRef, error) {
+	switch {
+	case first.Row == "":
+		return parseColumnRefText(text, first.Sheet, false, lenient)
+	case first.Column == "":
+		return parseRowRefText(text, first.Sheet, false)
+	default:
+		return parseCellRefText(text, first.Sheet, false, lenient)
+	}
 }
 
 func (p *parser) parseCall(name string) (Node, error) {
@@ -427,4 +521,41 @@ func parseCellRefText(text, sheet string, sheetQuoted, lenient bool) (CellRef, e
 		Column:      strings.ToUpper(col),
 		Row:         m[4],
 	}, nil
+}
+
+func parseColumnRefText(text, sheet string, sheetQuoted, lenient bool) (CellRef, error) {
+	m := columnRefPattern.FindStringSubmatch(text)
+	if m == nil {
+		return CellRef{}, fmt.Errorf("invalid column reference %q", text)
+	}
+	col := m[2]
+	if !lenient && col != strings.ToUpper(col) {
+		return CellRef{}, fmt.Errorf("column reference %q must use uppercase letters in strict mode", text)
+	}
+	return CellRef{
+		Sheet:       sheet,
+		SheetQuoted: sheetQuoted,
+		ColAbsolute: m[1] == "$",
+		Column:      strings.ToUpper(col),
+	}, nil
+}
+
+func parseRowRefText(text, sheet string, sheetQuoted bool) (CellRef, error) {
+	m := rowRefPattern.FindStringSubmatch(text)
+	if m == nil {
+		return CellRef{}, fmt.Errorf("invalid row reference %q", text)
+	}
+	return CellRef{
+		Sheet:       sheet,
+		SheetQuoted: sheetQuoted,
+		RowAbsolute: m[1] == "$",
+		Row:         m[2],
+	}, nil
+}
+
+// isPlainInteger reports whether a lexed number token is a bare digit
+// sequence with no decimal point or exponent - the only shape that can
+// double as a full-row reference.
+func isPlainInteger(text string) bool {
+	return !strings.ContainsAny(text, ".eE")
 }
