@@ -1,0 +1,71 @@
+mode: strict
+input: =SUM(A1:A10,B2)*2
+output: =SUM(A1:A10, B2) * 2
+
+mode: strict
+input: =sum(a1:a10,b2)*2
+error: function name "sum" must be uppercase in strict mode
+
+mode: lenient
+input: sum(a1:a10,b2)*2
+output: =SUM(A1:A10, B2) * 2
+
+mode: strict
+input: =SUM(A1,B2,)
+error: trailing comma not allowed in strict mode at position 10
+
+mode: lenient
+input: =SUM(A1,B2,)
+output: =SUM(A1, B2)
+
+mode: strict
+input: ='Q1 Report'!A1+Sheet2!$B$2
+output: ='Q1 Report'!A1 + Sheet2!$B$2
+
+mode: strict
+input: =IF(A1=0,#DIV/0!,A1/B1)
+output: =IF(A1 = 0, #DIV/0!, A1 / B1)
+
+mode: strict
+input: =SUM(A:A)+SUM(TaxRate,Sheet2!1:3)
+output: =SUM(A:A) + SUM(TaxRate, Sheet2!1:3)
+
+mode: strict
+input: =-2^2
+output: =-2 ^ 2
+
+mode: strict
+input: =A1%+B1
+output: =A1% + B1
+
+mode: strict
+input: =(A1+B1)*2
+output: =(A1 + B1) * 2
+
+mode: strict
+input: =TaxRate*Rate2
+output: =TaxRate * Rate2
+
+mode: strict
+input: ="a""b"
+output: ="a""b"
+
+mode: strict
+input: SUM(A1)
+error: formula must start with '=' (use --lenient to allow bare expressions)
+
+mode: strict
+input: =
+error: empty formula body
+
+mode: strict
+input: ="abc
+error: unterminated string literal at position 0
+
+mode: strict
+input: =a1
+error: cell reference "a1" must use uppercase column letters in strict mode
+
+mode: strict
+input: =true
+error: boolean literal "true" must be uppercase in strict mode
