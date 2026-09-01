@@ -84,11 +84,16 @@ or a function call is parsed as a named range and printed back exactly as
 written - unlike function names and column letters, a name has no canonical
 casing to normalize toward.
 
+Array literals (`{1,2,3;4,5,6}`, rows separated by `;`, elements by `,`)
+are parsed too, with the same constraint Excel has: elements can only be
+number, string, boolean, or error constants - no cell references, names, or
+nested arrays - and every row must be the same length.
+
 ## What isn't, yet
 
-Array literals (`{1,2,3}`), structured table references
-(`Table1[Column]`), and the intersection/union operators. Formulas using
-those fail to parse for now - see the roadmap in the issue tracker.
+Structured table references (`Table1[Column]`) and the intersection/union
+operators. Formulas using those fail to parse for now - see the roadmap in
+the issue tracker.
 
 ## Library use
 

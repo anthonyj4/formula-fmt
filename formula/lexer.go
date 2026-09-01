@@ -31,6 +31,9 @@ const (
 	tokComma
 	tokColon
 	tokBang
+	tokLBrace
+	tokRBrace
+	tokSemi
 )
 
 // token positions are rune offsets into the formula body, i.e. after the
@@ -89,6 +92,12 @@ func lex(src string) ([]token, error) {
 			simple(tokColon, ":")
 		case c == '!':
 			simple(tokBang, "!")
+		case c == '{':
+			simple(tokLBrace, "{")
+		case c == '}':
+			simple(tokRBrace, "}")
+		case c == ';':
+			simple(tokSemi, ";")
 		case c == '=':
 			simple(tokEq, "=")
 		case c == '<':

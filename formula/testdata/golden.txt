@@ -69,3 +69,31 @@ error: cell reference "a1" must use uppercase column letters in strict mode
 mode: strict
 input: =true
 error: boolean literal "true" must be uppercase in strict mode
+
+mode: strict
+input: =SUM({1,2,3})
+output: =SUM({1,2,3})
+
+mode: strict
+input: ={1,2;3,4}
+output: ={1,2;3,4}
+
+mode: strict
+input: ={-1,"a",TRUE,#N/A}
+output: ={-1,"a",TRUE,#N/A}
+
+mode: lenient
+input: ={true,1}
+output: ={TRUE,1}
+
+mode: strict
+input: ={true,1}
+error: boolean literal "true" must be uppercase in strict mode
+
+mode: strict
+input: ={1,2;3}
+error: array literal rows must all be the same length
+
+mode: strict
+input: ={A1}
+error: array literal elements must be constants, got "A1" at position 1

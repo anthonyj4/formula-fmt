@@ -62,6 +62,12 @@ type BinaryExpr struct {
 
 type Paren struct{ X Node }
 
+// ArrayLiteral is a constant array such as {1,2,3;4,5,6}. Excel only allows
+// number, string, boolean, and error constants inside one - no cell
+// references, names, or nested expressions - and every row must be the same
+// length. Rows[i][j] is the element at row i, column j.
+type ArrayLiteral struct{ Rows [][]Node }
+
 // Call is a function call. An entry in Args is nil for an omitted argument
 // (e.g. the middle slot in SUM(A1,,B2)), which is only produced in lenient
 // mode.
@@ -82,6 +88,7 @@ func (*BinaryExpr) node()   {}
 func (*Paren) node()        {}
 func (*Call) node()         {}
 func (*NamedRange) node()   {}
+func (*ArrayLiteral) node() {}
 
 // Formula is a fully parsed cell formula.
 type Formula struct {
@@ -328,8 +335,101 @@ func (p *parser) parsePrimary() (Node, error) {
 		return &Paren{X: x}, nil
 	case tokIdent:
 		return p.parseIdentLike()
+	case tokLBrace:
+		return p.parseArrayLiteral()
 	default:
 		return nil, fmt.Errorf("unexpected token %q at position %d", tok.text, tok.pos)
+	}
+}
+
+// parseArrayLiteral parses a constant array like {1,2,3;4,5,6}. Rows are
+// separated by ';', elements within a row by ','. Every row must have the
+// same number of elements - Excel doesn't allow jagged array literals.
+func (p *parser) parseArrayLiteral() (Node, error) {
+	p.advance() // consume '{'
+
+	row, err := p.parseArrayRow()
+	if err != nil {
+		return nil, err
+	}
+	rows := [][]Node{row}
+	for p.cur().kind == tokSemi {
+		p.advance()
+		row, err := p.parseArrayRow()
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, row)
+	}
+
+	if p.cur().kind != tokRBrace {
+		return nil, fmt.Errorf("expected '}' or ';' at position %d", p.cur().pos)
+	}
+	p.advance()
+
+	for _, r := range rows {
+		if len(r) != len(rows[0]) {
+			return nil, fmt.Errorf("array literal rows must all be the same length")
+		}
+	}
+	return &ArrayLiteral{Rows: rows}, nil
+}
+
+func (p *parser) parseArrayRow() ([]Node, error) {
+	elem, err := p.parseArrayElement()
+	if err != nil {
+		return nil, err
+	}
+	elems := []Node{elem}
+	for p.cur().kind == tokComma {
+		p.advance()
+		elem, err := p.parseArrayElement()
+		if err != nil {
+			return nil, err
+		}
+		elems = append(elems, elem)
+	}
+	return elems, nil
+}
+
+// parseArrayElement parses a single constant inside an array literal.
+// Unlike a normal expression, only literals are allowed - no cell
+// references, names, or nested arrays - and a unary sign may only prefix a
+// number.
+func (p *parser) parseArrayElement() (Node, error) {
+	tok := p.cur()
+	switch tok.kind {
+	case tokMinus, tokPlus:
+		op := tok.text
+		opPos := tok.pos
+		p.advance()
+		numTok := p.cur()
+		if numTok.kind != tokNumber {
+			return nil, fmt.Errorf("expected number after %q in array literal at position %d", op, opPos)
+		}
+		p.advance()
+		return &UnaryExpr{Op: op, X: &Number{Text: numTok.text}}, nil
+	case tokNumber:
+		p.advance()
+		return &Number{Text: tok.text}, nil
+	case tokString:
+		p.advance()
+		return &String{Value: tok.text}, nil
+	case tokErrorLit:
+		p.advance()
+		return &ErrorLiteral{Text: tok.text}, nil
+	case tokIdent:
+		upper := strings.ToUpper(tok.text)
+		if upper == "TRUE" || upper == "FALSE" {
+			if !p.lenient && tok.text != upper {
+				return nil, fmt.Errorf("boolean literal %q must be uppercase in strict mode", tok.text)
+			}
+			p.advance()
+			return &Boolean{Value: upper == "TRUE"}, nil
+		}
+		return nil, fmt.Errorf("array literal elements must be constants, got %q at position %d", tok.text, tok.pos)
+	default:
+		return nil, fmt.Errorf("unexpected token %q in array literal at position %d", tok.text, tok.pos)
 	}
 }
 

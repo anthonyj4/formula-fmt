@@ -56,6 +56,20 @@ func writeNode(b *strings.Builder, n Node) {
 		b.WriteByte('(')
 		writeNode(b, v.X)
 		b.WriteByte(')')
+	case *ArrayLiteral:
+		b.WriteByte('{')
+		for i, row := range v.Rows {
+			if i > 0 {
+				b.WriteByte(';')
+			}
+			for j, elem := range row {
+				if j > 0 {
+					b.WriteByte(',')
+				}
+				writeNode(b, elem)
+			}
+		}
+		b.WriteByte('}')
 	case *NamedRange:
 		writeSheetPrefix(b, v.Sheet, v.SheetQuoted)
 		b.WriteString(v.Name)
