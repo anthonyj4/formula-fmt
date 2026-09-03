@@ -73,6 +73,8 @@ func writeNode(b *strings.Builder, n Node) {
 	case *NamedRange:
 		writeSheetPrefix(b, v.Sheet, v.SheetQuoted)
 		b.WriteString(v.Name)
+	case *TableRef:
+		writeTableRef(b, v)
 	case *Call:
 		b.WriteString(strings.ToUpper(v.Name))
 		b.WriteByte('(')
@@ -86,6 +88,53 @@ func writeNode(b *strings.Builder, n Node) {
 			writeNode(b, arg)
 		}
 		b.WriteByte(')')
+	}
+}
+
+// writeTableRef renders a structured reference. A single item (one column,
+// one specifier, or a column range) is printed without the extra "[...]"
+// wrapper Excel only needs once there's more than one item to separate from
+// the rest, e.g. "Table1[Column1]" but "Table1[[#Headers],[Column1]]".
+func writeTableRef(b *strings.Builder, r *TableRef) {
+	b.WriteString(r.Table)
+	b.WriteByte('[')
+	switch {
+	case r.ThisRow:
+		b.WriteByte('@')
+		b.WriteString(r.Columns[0])
+	case len(r.Specifiers) == 0 && len(r.Columns) == 1:
+		b.WriteString(r.Columns[0])
+	case len(r.Specifiers) == 1 && len(r.Columns) == 0:
+		b.WriteString(r.Specifiers[0])
+	case len(r.Specifiers) == 0:
+		writeBracketedColumnRange(b, r.Columns)
+	default:
+		for i, spec := range r.Specifiers {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteByte('[')
+			b.WriteString(spec)
+			b.WriteByte(']')
+		}
+		if len(r.Columns) > 0 {
+			if len(r.Specifiers) > 0 {
+				b.WriteByte(',')
+			}
+			writeBracketedColumnRange(b, r.Columns)
+		}
+	}
+	b.WriteByte(']')
+}
+
+func writeBracketedColumnRange(b *strings.Builder, cols []string) {
+	b.WriteByte('[')
+	b.WriteString(cols[0])
+	b.WriteByte(']')
+	if len(cols) == 2 {
+		b.WriteString(":[")
+		b.WriteString(cols[1])
+		b.WriteByte(']')
 	}
 }
 

@@ -97,3 +97,43 @@ error: array literal rows must all be the same length
 mode: strict
 input: ={A1}
 error: array literal elements must be constants, got "A1" at position 1
+
+mode: strict
+input: =SUM(Table1[Column1])
+output: =SUM(Table1[Column1])
+
+mode: strict
+input: =Table1[[Column 1]]
+output: =Table1[Column 1]
+
+mode: strict
+input: =Table1[[Column1]:[Column2]]
+output: =Table1[[Column1]:[Column2]]
+
+mode: strict
+input: =Table1[#All]
+output: =Table1[#All]
+
+mode: strict
+input: =Table1[[#Headers],[Column1]]
+output: =Table1[[#Headers],[Column1]]
+
+mode: strict
+input: =Table1[[#Headers],[Column1]:[Column2]]
+output: =Table1[[#Headers],[Column1]:[Column2]]
+
+mode: strict
+input: =Table1[@Column1]
+output: =Table1[@Column1]
+
+mode: strict
+input: =Table1[#this row]
+error: item specifier "#this row" must be written as "#This Row" in strict mode
+
+mode: lenient
+input: =Table1[#this row]
+output: =Table1[#This Row]
+
+mode: strict
+input: =Table1[#Bogus]
+error: unknown item specifier "#Bogus" at position 7

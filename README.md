@@ -89,11 +89,20 @@ are parsed too, with the same constraint Excel has: elements can only be
 number, string, boolean, or error constants - no cell references, names, or
 nested arrays - and every row must be the same length.
 
+Structured table references are parsed too: a single column (`Table1[Column1]`),
+a column range (`Table1[[Column1]:[Column2]]`), item specifiers on their own
+(`Table1[#All]`, `Table1[#Headers]`, `Table1[#Data]`, `Table1[#Totals]`,
+`Table1[#This Row]`), specifiers combined with a column
+(`Table1[[#Headers],[Column1]]`), and the current-row shorthand
+(`Table1[@Column1]`). As with function names, item specifiers must already be
+spelled canonically in strict mode (`#All`, not `#all`); redundant brackets
+around a lone column or specifier are accepted on input but not reproduced on
+output.
+
 ## What isn't, yet
 
-Structured table references (`Table1[Column]`) and the intersection/union
-operators. Formulas using those fail to parse for now - see the roadmap in
-the issue tracker.
+The intersection and union operators. Formulas using those fail to parse for
+now - see the roadmap in the issue tracker.
 
 ## Library use
 

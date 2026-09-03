@@ -76,6 +76,20 @@ type Call struct {
 	Args []Node
 }
 
+// TableRef is a structured reference into an Excel table, such as
+// Table1[Column1], Table1[[#Headers],[Column1]:[Column2]], or the
+// current-row shorthand Table1[@Column1]. Specifiers holds special item
+// specifiers ("#All", "#Data", "#Headers", "#Totals", "#This Row") in
+// source order. Columns holds 0, 1, or 2 column names - 2 means a
+// [C1]:[C2] column range. ThisRow marks the "@" shorthand, which always
+// carries exactly one column and no specifiers.
+type TableRef struct {
+	Table      string
+	ThisRow    bool
+	Specifiers []string
+	Columns    []string
+}
+
 func (*Number) node()       {}
 func (*String) node()       {}
 func (*Boolean) node()      {}
@@ -89,6 +103,7 @@ func (*Paren) node()        {}
 func (*Call) node()         {}
 func (*NamedRange) node()   {}
 func (*ArrayLiteral) node() {}
+func (*TableRef) node()     {}
 
 // Formula is a fully parsed cell formula.
 type Formula struct {
@@ -132,7 +147,7 @@ func Parse(src string, lenient bool) (*Formula, error) {
 		return nil, err
 	}
 
-	p := &parser{tokens: toks, lenient: lenient}
+	p := &parser{tokens: toks, lenient: lenient, src: []rune(work)}
 	body, err := p.parseExpr()
 	if err != nil {
 		return nil, err
@@ -147,6 +162,12 @@ type parser struct {
 	tokens  []token
 	pos     int
 	lenient bool
+	// src is the formula body (after the leading '=' has been stripped),
+	// indexed by rune to match token.pos. Structured-reference column
+	// names are read straight out of it instead of being reassembled from
+	// tokens, so that names containing spaces or punctuation the general
+	// lexer would otherwise split apart round-trip correctly.
+	src []rune
 }
 
 func (p *parser) cur() token { return p.tokens[p.pos] }
@@ -467,6 +488,10 @@ func (p *parser) parseIdentLike() (Node, error) {
 		return p.parseCall(name)
 	}
 
+	if p.cur().kind == tokLBracket && !wasQuoted {
+		return p.parseTableRef(name)
+	}
+
 	upper := strings.ToUpper(name)
 	if upper == "TRUE" || upper == "FALSE" {
 		if !p.lenient && name != upper {
@@ -602,6 +627,214 @@ func (p *parser) parseCall(name string) (Node, error) {
 	}
 	p.advance()
 	return call, nil
+}
+
+// parseTableRef parses the "[...]" portion of a structured table reference,
+// having already consumed the table name. The body is one of:
+//
+//	@ColumnItem            current-row shorthand, e.g. Table1[@Column1]
+//	#Specifier             a single item specifier on its own, e.g. Table1[#All]
+//	ColumnRange            a bare column, or column range, e.g. Table1[Column1]
+//	Item (, Item)*         a bracketed list mixing specifiers and columns,
+//	                       e.g. Table1[[#Headers],[Column1]:[Column2]] -
+//	                       once there's more than one item every item needs
+//	                       its own brackets to separate it from the rest.
+func (p *parser) parseTableRef(table string) (Node, error) {
+	p.advance() // consume '['
+	ref := &TableRef{Table: table}
+
+	switch {
+	case p.cur().kind == tokAt:
+		p.advance()
+		col, err := p.parseColumnItem()
+		if err != nil {
+			return nil, err
+		}
+		ref.ThisRow = true
+		ref.Columns = []string{col}
+
+	case p.cur().kind == tokLBracket:
+		if err := p.parseTableRefItemList(ref); err != nil {
+			return nil, err
+		}
+
+	case p.cur().kind == tokErrorLit:
+		spec, err := p.parseSpecifier()
+		if err != nil {
+			return nil, err
+		}
+		ref.Specifiers = []string{spec}
+
+	default:
+		cols, err := p.parseColumnRange()
+		if err != nil {
+			return nil, err
+		}
+		ref.Columns = cols
+	}
+
+	if p.cur().kind != tokRBracket {
+		return nil, fmt.Errorf("expected ']' at position %d", p.cur().pos)
+	}
+	p.advance()
+	return ref, nil
+}
+
+// parseTableRefItemList parses a comma-separated list of bracketed items,
+// e.g. "[#Headers],[Column1]:[Column2]" (the part between the outer
+// "Table1[" and "]"). Each item is either a bracketed specifier
+// ("[#Headers]") or a bracketed column, optionally extended into a range
+// with ":[Column2]"; at most one column (or column range) is allowed, and
+// it must come last, matching how Excel itself only ever places it there.
+func (p *parser) parseTableRefItemList(ref *TableRef) error {
+	for {
+		if p.cur().kind != tokLBracket {
+			return fmt.Errorf("expected '[' at position %d", p.cur().pos)
+		}
+		p.advance()
+
+		if p.cur().kind == tokErrorLit {
+			spec, err := p.parseSpecifier()
+			if err != nil {
+				return err
+			}
+			if p.cur().kind != tokRBracket {
+				return fmt.Errorf("expected ']' at position %d", p.cur().pos)
+			}
+			p.advance()
+			ref.Specifiers = append(ref.Specifiers, spec)
+		} else {
+			name, err := p.parseColumnName()
+			if err != nil {
+				return err
+			}
+			if p.cur().kind != tokRBracket {
+				return fmt.Errorf("expected ']' at position %d", p.cur().pos)
+			}
+			p.advance()
+			cols := []string{name}
+			if p.cur().kind == tokColon {
+				p.advance()
+				if p.cur().kind != tokLBracket {
+					return fmt.Errorf("expected '[' at position %d", p.cur().pos)
+				}
+				p.advance()
+				name2, err := p.parseColumnName()
+				if err != nil {
+					return err
+				}
+				if p.cur().kind != tokRBracket {
+					return fmt.Errorf("expected ']' at position %d", p.cur().pos)
+				}
+				p.advance()
+				cols = append(cols, name2)
+			}
+			ref.Columns = cols
+		}
+
+		if p.cur().kind != tokComma {
+			return nil
+		}
+		p.advance()
+	}
+}
+
+// tableSpecifiers maps the lowercased form of every valid item specifier to
+// its canonical spelling.
+var tableSpecifiers = map[string]string{
+	"#all":      "#All",
+	"#data":     "#Data",
+	"#headers":  "#Headers",
+	"#totals":   "#Totals",
+	"#this row": "#This Row",
+}
+
+// parseSpecifier parses one item specifier such as "#All" or "#This Row".
+// The lexer treats "#This" and "Row" as separate tokens (an error literal
+// followed by an identifier, split on the space between them), so this
+// glues the two back together when they appear next to each other.
+func (p *parser) parseSpecifier() (string, error) {
+	tok := p.cur()
+	if tok.kind != tokErrorLit {
+		return "", fmt.Errorf("expected item specifier at position %d", tok.pos)
+	}
+	text := tok.text
+	p.advance()
+	if strings.EqualFold(text, "#This") && p.cur().kind == tokIdent && strings.EqualFold(p.cur().text, "Row") {
+		text += " " + p.cur().text
+		p.advance()
+	}
+
+	canon, ok := tableSpecifiers[strings.ToLower(text)]
+	if !ok {
+		return "", fmt.Errorf("unknown item specifier %q at position %d", text, tok.pos)
+	}
+	if !p.lenient && text != canon {
+		return "", fmt.Errorf("item specifier %q must be written as %q in strict mode", text, canon)
+	}
+	return canon, nil
+}
+
+// parseColumnRange parses a single column or a "[C1]:[C2]" range.
+func (p *parser) parseColumnRange() ([]string, error) {
+	first, err := p.parseColumnItem()
+	if err != nil {
+		return nil, err
+	}
+	if p.cur().kind != tokColon {
+		return []string{first}, nil
+	}
+	p.advance()
+	second, err := p.parseColumnItem()
+	if err != nil {
+		return nil, err
+	}
+	return []string{first, second}, nil
+}
+
+// parseColumnItem parses one column name, either bracketed ("[Column 1]")
+// or bare ("Column1").
+func (p *parser) parseColumnItem() (string, error) {
+	if p.cur().kind == tokLBracket {
+		p.advance()
+		name, err := p.parseColumnName()
+		if err != nil {
+			return "", err
+		}
+		if p.cur().kind != tokRBracket {
+			return "", fmt.Errorf("expected ']' at position %d", p.cur().pos)
+		}
+		p.advance()
+		return name, nil
+	}
+	return p.parseColumnName()
+}
+
+// parseColumnName reads raw source text up to (but not including) the next
+// ']', ':', or ',', and returns it trimmed of surrounding whitespace. See
+// the parser.src field comment for why this reads source text rather than
+// token text.
+func (p *parser) parseColumnName() (string, error) {
+	start := p.cur()
+	if isColumnNameTerminator(start.kind) {
+		return "", fmt.Errorf("expected column name at position %d", start.pos)
+	}
+	startPos := start.pos
+	endPos := startPos
+	for !isColumnNameTerminator(p.cur().kind) {
+		tok := p.cur()
+		endPos = tok.pos + len([]rune(tok.text))
+		p.advance()
+	}
+	name := strings.TrimSpace(string(p.src[startPos:endPos]))
+	if name == "" {
+		return "", fmt.Errorf("empty column name at position %d", startPos)
+	}
+	return name, nil
+}
+
+func isColumnNameTerminator(k tokenKind) bool {
+	return k == tokRBracket || k == tokColon || k == tokComma || k == tokEOF
 }
 
 func parseCellRefText(text, sheet string, sheetQuoted, lenient bool) (CellRef, error) {
