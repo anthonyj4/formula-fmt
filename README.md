@@ -68,6 +68,19 @@ $ echo '=sum(a1,a2)' | go run . --lenient
 =SUM(A1, A2)
 ```
 
+Pass `--check` for CI: it prints nothing on success, and on failure prints
+why and exits 1, whether the formula was invalid or just not already in
+canonical form.
+
+```
+$ go run . --check '=SUM(A1,B2)'
+not canonical: got "=SUM(A1,B2)", want "=SUM(A1, B2)"
+
+$ go run . --check '=SUM(A1, B2)'
+$ echo $?
+0
+```
+
 ## What's parsed
 
 Numbers, string literals (with `""` as an escaped quote, matching Excel),

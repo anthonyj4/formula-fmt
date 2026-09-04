@@ -14,8 +14,9 @@ import (
 
 func main() {
 	lenient := flag.Bool("lenient", false, "accept common real-world sloppiness (missing '=', lowercase refs, trailing commas) instead of rejecting it")
+	check := flag.Bool("check", false, "don't print the canonical form; exit 1 if the formula is invalid or not already canonical")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: %s [--lenient] [formula]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage: %s [--lenient] [--check] [formula]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Reads a spreadsheet formula from the argument, or from stdin if no\n")
 		fmt.Fprintf(os.Stderr, "argument is given, checks it, and prints the canonical form.\n\n")
 		flag.PrintDefaults()
@@ -39,5 +40,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "invalid formula: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println(formula.Print(f))
+	canonical := formula.Print(f)
+
+	if *check {
+		if src != canonical {
+			fmt.Fprintf(os.Stderr, "not canonical: got %q, want %q\n", src, canonical)
+			os.Exit(1)
+		}
+		return
+	}
+	fmt.Println(canonical)
 }
