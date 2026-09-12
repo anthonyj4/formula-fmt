@@ -81,6 +81,24 @@ $ echo $?
 0
 ```
 
+## Linting mismatched delimiters
+
+`--lint` skips parsing and just reports every mismatched or unbalanced
+`()`, `{}`, and `[]` in the formula, instead of stopping at the first
+error the way normal parsing does:
+
+```
+$ go run . --lint '=SUM(A1,B2'
+position 3: unclosed "("
+
+$ go run . --lint '=SUM(A1,B2]'
+position 9: "]" does not match "(" opened at position 3
+```
+
+This is useful on formulas that are too broken for a normal parse error to
+say anything more specific than "unexpected token" - it finds every
+delimiter problem in one pass rather than bailing at the first one.
+
 ## What's parsed
 
 Numbers, string literals (with `""` as an escaped quote, matching Excel),
