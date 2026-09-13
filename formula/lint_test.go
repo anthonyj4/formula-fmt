@@ -51,6 +51,38 @@ func TestLint(t *testing.T) {
 				{Pos: 14, Message: `")" does not match "[" opened at position 6`},
 			},
 		},
+		{
+			name:  "known error literal",
+			input: "=IF(A1=0,#DIV/0!,A1/B1)",
+			want:  nil,
+		},
+		{
+			name:  "malformed error literal missing bang",
+			input: "=IF(A1=0,#REF,A1)",
+			want: []Issue{
+				{Pos: 8, Message: `"#REF" is not a recognized error literal or table item specifier`},
+			},
+		},
+		{
+			name:  "known item specifier including two-word form",
+			input: "=Table1[#This Row]",
+			want:  nil,
+		},
+		{
+			name:  "unknown item specifier",
+			input: "=Table1[#Foo]",
+			want: []Issue{
+				{Pos: 7, Message: `"#Foo" is not a recognized error literal or table item specifier`},
+			},
+		},
+		{
+			name:  "unclosed brace plus unknown specifier reported in position order",
+			input: "={#Foo,SUM(A1)",
+			want: []Issue{
+				{Pos: 0, Message: `unclosed "{"`},
+				{Pos: 1, Message: `"#Foo" is not a recognized error literal or table item specifier`},
+			},
+		},
 	}
 
 	for _, c := range cases {

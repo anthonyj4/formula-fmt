@@ -81,11 +81,13 @@ $ echo $?
 0
 ```
 
-## Linting mismatched delimiters
+## Linting
 
-`--lint` skips parsing and just reports every mismatched or unbalanced
-`()`, `{}`, and `[]` in the formula, instead of stopping at the first
-error the way normal parsing does:
+`--lint` skips parsing and instead reports every problem it can find in one
+pass, rather than stopping at the first error the way normal parsing does:
+every mismatched or unbalanced `()`, `{}`, and `[]`, and every `#...` token
+that isn't a real error literal (`#REF!`, `#DIV/0!`, ...) or table item
+specifier (`#All`, `#Headers`, ...).
 
 ```
 $ go run . --lint '=SUM(A1,B2'
@@ -93,11 +95,17 @@ position 3: unclosed "("
 
 $ go run . --lint '=SUM(A1,B2]'
 position 9: "]" does not match "(" opened at position 3
+
+$ go run . --lint '=IF(A1=0,#REF,A1)'
+position 8: "#REF" is not a recognized error literal or table item specifier
+
+$ go run . --lint '=Table1[#Foo]'
+position 7: "#Foo" is not a recognized error literal or table item specifier
 ```
 
 This is useful on formulas that are too broken for a normal parse error to
-say anything more specific than "unexpected token" - it finds every
-delimiter problem in one pass rather than bailing at the first one.
+say anything more specific than "unexpected token" - it finds every problem
+in one pass rather than bailing at the first one.
 
 ## What's parsed
 
