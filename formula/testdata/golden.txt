@@ -137,3 +137,27 @@ output: =Table1[#This Row]
 mode: strict
 input: =Table1[#Bogus]
 error: unknown item specifier "#Bogus" at position 7
+
+mode: strict
+input: =SUM((A1:A5,C1:C5))
+output: =SUM((A1:A5, C1:C5))
+
+mode: strict
+input: =(A1,B1)
+output: =(A1, B1)
+
+mode: strict
+input: =(TaxRate,Table1[Column1])
+output: =(TaxRate, Table1[Column1])
+
+mode: strict
+input: =SUM((A1,B1),C1)
+output: =SUM((A1, B1), C1)
+
+mode: strict
+input: =(A1+B1,C1)
+error: invalid union operand at position 1: must be a cell reference, range, name, or table reference
+
+mode: strict
+input: =(A1,B1+C1)
+error: invalid union operand at position 4: must be a cell reference, range, name, or table reference

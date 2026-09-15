@@ -56,6 +56,15 @@ func writeNode(b *strings.Builder, n Node) {
 		b.WriteByte('(')
 		writeNode(b, v.X)
 		b.WriteByte(')')
+	case *Union:
+		b.WriteByte('(')
+		for i, ref := range v.Refs {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			writeNode(b, ref)
+		}
+		b.WriteByte(')')
 	case *ArrayLiteral:
 		b.WriteByte('{')
 		for i, row := range v.Rows {

@@ -62,6 +62,13 @@ type BinaryExpr struct {
 
 type Paren struct{ X Node }
 
+// Union is the reference union operator: a comma joining two or more
+// references into one, e.g. (A1:A5,C1:C5). Excel only recognizes the comma
+// this way inside an extra pair of parentheses - without them it's just the
+// separator between function arguments - so a Union always corresponds to
+// exactly one pair of parens in the source and prints its own.
+type Union struct{ Refs []Node }
+
 // ArrayLiteral is a constant array such as {1,2,3;4,5,6}. Excel only allows
 // number, string, boolean, and error constants inside one - no cell
 // references, names, or nested expressions - and every row must be the same
@@ -100,6 +107,7 @@ func (*UnaryExpr) node()    {}
 func (*PercentExpr) node()  {}
 func (*BinaryExpr) node()   {}
 func (*Paren) node()        {}
+func (*Union) node()        {}
 func (*Call) node()         {}
 func (*NamedRange) node()   {}
 func (*ArrayLiteral) node() {}
@@ -345,9 +353,13 @@ func (p *parser) parsePrimary() (Node, error) {
 		return &ErrorLiteral{Text: tok.text}, nil
 	case tokLParen:
 		p.advance()
+		startPos := p.cur().pos
 		x, err := p.parseExpr()
 		if err != nil {
 			return nil, err
+		}
+		if p.cur().kind == tokComma {
+			return p.parseUnion(x, startPos)
 		}
 		if p.cur().kind != tokRParen {
 			return nil, fmt.Errorf("expected ')' at position %d", p.cur().pos)
@@ -360,6 +372,50 @@ func (p *parser) parsePrimary() (Node, error) {
 		return p.parseArrayLiteral()
 	default:
 		return nil, fmt.Errorf("unexpected token %q at position %d", tok.text, tok.pos)
+	}
+}
+
+// parseUnion parses the rest of a union reference expression (ref,ref,...),
+// having already parsed first (starting at firstPos) and found a ',' after
+// it. The closing ')' is consumed here rather than by the tokLParen case in
+// parsePrimary, since a plain parenthesized expression never sees a comma.
+func (p *parser) parseUnion(first Node, firstPos int) (Node, error) {
+	if err := checkUnionOperand(first, firstPos); err != nil {
+		return nil, err
+	}
+	refs := []Node{first}
+	for p.cur().kind == tokComma {
+		p.advance()
+		pos := p.cur().pos
+		x, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if err := checkUnionOperand(x, pos); err != nil {
+			return nil, err
+		}
+		refs = append(refs, x)
+	}
+	if p.cur().kind != tokRParen {
+		return nil, fmt.Errorf("expected ')' or ',' at position %d", p.cur().pos)
+	}
+	p.advance()
+	return &Union{Refs: refs}, nil
+}
+
+// checkUnionOperand reports whether n is a shape the union operator accepts.
+// Excel's union only makes sense over references - cells, ranges, names,
+// table refs, nested unions, or a parenthesized one of those - not over
+// arithmetic or other value expressions.
+func checkUnionOperand(n Node, pos int) error {
+	if paren, ok := n.(*Paren); ok {
+		return checkUnionOperand(paren.X, pos)
+	}
+	switch n.(type) {
+	case *CellRef, *Range, *NamedRange, *TableRef, *Union:
+		return nil
+	default:
+		return fmt.Errorf("invalid union operand at position %d: must be a cell reference, range, name, or table reference", pos)
 	}
 }
 

@@ -138,10 +138,16 @@ spelled canonically in strict mode (`#All`, not `#all`); redundant brackets
 around a lone column or specifier are accepted on input but not reproduced on
 output.
 
+The union reference operator is parsed too: `SUM((A1:A5,C1:C5))` combines the
+two ranges into one reference passed to `SUM`. Excel only recognizes the
+comma this way inside its own extra pair of parentheses - elsewhere it's just
+the separator between function arguments - and only over other references
+(cells, ranges, names, table refs), not arbitrary expressions.
+
 ## What isn't, yet
 
-The intersection and union operators. Formulas using those fail to parse for
-now - see the roadmap in the issue tracker.
+The intersection operator (a space between two references, e.g. `A1:B5
+B1:C10`). Formulas using it fail to parse for now.
 
 ## Library use
 
