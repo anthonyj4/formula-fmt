@@ -40,12 +40,16 @@ const (
 )
 
 // token positions are rune offsets into the formula body, i.e. after the
-// leading '=' has already been stripped by Parse.
+// leading '=' has already been stripped by Parse. spaceBefore records
+// whether whitespace separated this token from the previous one - the
+// parser needs that to recognize the intersection operator, which is
+// whitespace between two references and otherwise leaves no token behind.
 type token struct {
-	kind   tokenKind
-	text   string
-	pos    int
-	quoted bool
+	kind        tokenKind
+	text        string
+	pos         int
+	quoted      bool
+	spaceBefore bool
 }
 
 func lex(src string) ([]token, error) {
@@ -53,6 +57,7 @@ func lex(src string) ([]token, error) {
 	n := len(runes)
 	var toks []token
 	i := 0
+	sawSpace := false
 
 	peek := func(off int) rune {
 		if i+off >= n {
@@ -62,7 +67,8 @@ func lex(src string) ([]token, error) {
 	}
 
 	simple := func(k tokenKind, s string) {
-		toks = append(toks, token{kind: k, text: s, pos: i})
+		toks = append(toks, token{kind: k, text: s, pos: i, spaceBefore: sawSpace})
+		sawSpace = false
 		i += len(s)
 	}
 
@@ -70,6 +76,7 @@ func lex(src string) ([]token, error) {
 		c := runes[i]
 		switch {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			sawSpace = true
 			i++
 		case c == '+':
 			simple(tokPlus, "+")
@@ -145,7 +152,8 @@ func lex(src string) ([]token, error) {
 			if !closed {
 				return nil, fmt.Errorf("unterminated string literal at position %d", start)
 			}
-			toks = append(toks, token{kind: tokString, text: sb.String(), pos: start})
+			toks = append(toks, token{kind: tokString, text: sb.String(), pos: start, spaceBefore: sawSpace})
+			sawSpace = false
 		case c == '\'':
 			// quoted sheet name, e.g. 'Q1 Report'!A1
 			start := i
@@ -169,7 +177,8 @@ func lex(src string) ([]token, error) {
 			if !closed {
 				return nil, fmt.Errorf("unterminated quoted name at position %d", start)
 			}
-			toks = append(toks, token{kind: tokIdent, text: sb.String(), pos: start, quoted: true})
+			toks = append(toks, token{kind: tokIdent, text: sb.String(), pos: start, quoted: true, spaceBefore: sawSpace})
+			sawSpace = false
 		case c == '#':
 			start := i
 			j := i + 1
@@ -179,7 +188,8 @@ func lex(src string) ([]token, error) {
 			if j < n && (runes[j] == '!' || runes[j] == '?') {
 				j++
 			}
-			toks = append(toks, token{kind: tokErrorLit, text: string(runes[start:j]), pos: start})
+			toks = append(toks, token{kind: tokErrorLit, text: string(runes[start:j]), pos: start, spaceBefore: sawSpace})
+			sawSpace = false
 			i = j
 		case isDigit(c) || (c == '.' && isDigit(peek(1))):
 			start := i
@@ -204,7 +214,8 @@ func lex(src string) ([]token, error) {
 					}
 				}
 			}
-			toks = append(toks, token{kind: tokNumber, text: string(runes[start:i]), pos: start})
+			toks = append(toks, token{kind: tokNumber, text: string(runes[start:i]), pos: start, spaceBefore: sawSpace})
+			sawSpace = false
 		case isLetter(c) || c == '_' || c == '$':
 			// '$' only makes sense as an absolute-reference marker (e.g.
 			// "$B$2"), but it's simplest to fold it into the identifier
@@ -214,7 +225,8 @@ func lex(src string) ([]token, error) {
 			for i < n && (isLetter(runes[i]) || isDigit(runes[i]) || runes[i] == '_' || runes[i] == '.' || runes[i] == '$') {
 				i++
 			}
-			toks = append(toks, token{kind: tokIdent, text: string(runes[start:i]), pos: start})
+			toks = append(toks, token{kind: tokIdent, text: string(runes[start:i]), pos: start, spaceBefore: sawSpace})
+			sawSpace = false
 		default:
 			return nil, fmt.Errorf("unexpected character %q at position %d", string(c), i)
 		}

@@ -56,6 +56,10 @@ func writeNode(b *strings.Builder, n Node) {
 		b.WriteByte('(')
 		writeNode(b, v.X)
 		b.WriteByte(')')
+	case *Intersect:
+		writeNode(b, v.X)
+		b.WriteByte(' ')
+		writeNode(b, v.Y)
 	case *Union:
 		b.WriteByte('(')
 		for i, ref := range v.Refs {

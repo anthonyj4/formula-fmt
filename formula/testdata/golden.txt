@@ -161,3 +161,27 @@ error: invalid union operand at position 1: must be a cell reference, range, nam
 mode: strict
 input: =(A1,B1+C1)
 error: invalid union operand at position 4: must be a cell reference, range, name, or table reference
+
+mode: strict
+input: =A1:B5 B1:C10
+output: =A1:B5 B1:C10
+
+mode: strict
+input: =A1 B1 C1
+output: =A1 B1 C1
+
+mode: strict
+input: =SUM(A1:B5 B1:C10,C1)
+output: =SUM(A1:B5 B1:C10, C1)
+
+mode: strict
+input: =(A1:B5 B1:C10,C1:D5)
+output: =(A1:B5 B1:C10, C1:D5)
+
+mode: lenient
+input: =a1:b5 b1:c10
+output: =A1:B5 B1:C10
+
+mode: strict
+input: =A1 5
+error: invalid intersection operand at position 3: must be a cell reference, range, name, or table reference

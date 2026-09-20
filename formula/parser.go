@@ -69,6 +69,13 @@ type Paren struct{ X Node }
 // exactly one pair of parens in the source and prints its own.
 type Union struct{ Refs []Node }
 
+// Intersect is the reference intersection operator: whitespace between two
+// references, selecting only the cells common to both, e.g. "A1:B5 B1:C10".
+// Unlike Union it has no surrounding punctuation to key off - the parser
+// notices it by checking whether the next reference-shaped token was
+// separated from the previous one by whitespace in the source.
+type Intersect struct{ X, Y Node }
+
 // ArrayLiteral is a constant array such as {1,2,3;4,5,6}. Excel only allows
 // number, string, boolean, and error constants inside one - no cell
 // references, names, or nested expressions - and every row must be the same
@@ -108,6 +115,7 @@ func (*PercentExpr) node()  {}
 func (*BinaryExpr) node()   {}
 func (*Paren) node()        {}
 func (*Union) node()        {}
+func (*Intersect) node()    {}
 func (*Call) node()         {}
 func (*NamedRange) node()   {}
 func (*ArrayLiteral) node() {}
@@ -188,7 +196,8 @@ func (p *parser) advance() {
 
 // Operator precedence, loosest to tightest binding: comparison, &, + -,
 // * /, unary +/- and ^ (Excel gives unary minus a tighter bind than ^, so
-// -2^2 is (-2)^2 == 4, not -(2^2)), then % as a postfix on whatever's left.
+// -2^2 is (-2)^2 == 4, not -(2^2)), the intersection operator (whitespace
+// between two references), then % as a postfix on whatever's left.
 
 func (p *parser) parseExpr() (Node, error) { return p.parseCompare() }
 
@@ -314,7 +323,65 @@ func (p *parser) parseUnary() (Node, error) {
 		}
 		return &UnaryExpr{Op: op, X: x}, nil
 	}
-	return p.parsePercent()
+	return p.parseIntersect()
+}
+
+// parseIntersect parses the reference intersection operator: two or more
+// reference-shaped operands separated by whitespace with no operator token
+// between them, e.g. "A1:B5 B1:C10". Since whitespace is otherwise
+// insignificant, this is also the only place two adjacent primaries would
+// ever be legal - anywhere else, seeing one right after another (with
+// nothing but a space between) is a syntax error - so there's no ambiguity
+// to worry about with the rest of the grammar.
+func (p *parser) parseIntersect() (Node, error) {
+	xPos := p.cur().pos
+	x, err := p.parsePercent()
+	if err != nil {
+		return nil, err
+	}
+	for p.cur().spaceBefore && startsPrimary(p.cur().kind) {
+		if err := checkIntersectOperand(x, xPos); err != nil {
+			return nil, err
+		}
+		yPos := p.cur().pos
+		y, err := p.parsePercent()
+		if err != nil {
+			return nil, err
+		}
+		if err := checkIntersectOperand(y, yPos); err != nil {
+			return nil, err
+		}
+		x = &Intersect{X: x, Y: y}
+	}
+	return x, nil
+}
+
+// checkIntersectOperand reports whether n is a shape the intersection
+// operator accepts - the same set of reference shapes Union accepts, plus
+// Intersect itself so a chain like "A1 B1 C1" round-trips as nested pairs.
+func checkIntersectOperand(n Node, pos int) error {
+	if paren, ok := n.(*Paren); ok {
+		return checkIntersectOperand(paren.X, pos)
+	}
+	switch n.(type) {
+	case *CellRef, *Range, *NamedRange, *TableRef, *Union, *Intersect:
+		return nil
+	default:
+		return fmt.Errorf("invalid intersection operand at position %d: must be a cell reference, range, name, or table reference", pos)
+	}
+}
+
+// startsPrimary reports whether a token kind is one parsePrimary can begin
+// with - used to recognize when a space-separated token is meant as an
+// intersection operand rather than something parsePrimary itself will
+// reject with a clearer error (e.g. an array literal).
+func startsPrimary(k tokenKind) bool {
+	switch k {
+	case tokNumber, tokString, tokErrorLit, tokLParen, tokIdent, tokLBrace:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *parser) parsePercent() (Node, error) {
@@ -412,7 +479,7 @@ func checkUnionOperand(n Node, pos int) error {
 		return checkUnionOperand(paren.X, pos)
 	}
 	switch n.(type) {
-	case *CellRef, *Range, *NamedRange, *TableRef, *Union:
+	case *CellRef, *Range, *NamedRange, *TableRef, *Union, *Intersect:
 		return nil
 	default:
 		return fmt.Errorf("invalid union operand at position %d: must be a cell reference, range, name, or table reference", pos)

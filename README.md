@@ -144,10 +144,15 @@ comma this way inside its own extra pair of parentheses - elsewhere it's just
 the separator between function arguments - and only over other references
 (cells, ranges, names, table refs), not arbitrary expressions.
 
-## What isn't, yet
+The intersection operator is parsed too: `A1:B5 B1:C10` is the single cell
+where the two ranges overlap. It's whitespace between two references rather
+than a symbol, so unlike union it needs no enclosing parentheses - but it's
+still restricted to reference operands, same as union.
 
-The intersection operator (a space between two references, e.g. `A1:B5
-B1:C10`). Formulas using it fail to parse for now.
+```
+$ go run . '=SUM(A1:B10 A5:C5)'
+=SUM(A1:B10 A5:C5)
+```
 
 ## Library use
 
