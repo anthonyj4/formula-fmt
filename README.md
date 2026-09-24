@@ -81,6 +81,18 @@ $ echo $?
 0
 ```
 
+Add `--diff` to get a unified diff instead of a got/want message - easier to read when the
+formula is long, and closer to what `gofmt -d` or `git diff` output looks like:
+
+```
+$ go run . --check --diff '=SUM(A1,B2)*2+SUM(C1,C2)'
+--- got
++++ want
+@@ -1,1 +1,1 @@
+-=SUM(A1,B2)*2+SUM(C1,C2)
++=SUM(A1, B2) * 2 + SUM(C1, C2)
+```
+
 ## Linting
 
 `--lint` skips parsing and instead reports every problem it can find in one
